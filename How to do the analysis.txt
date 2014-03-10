@@ -1,0 +1,59 @@
+Key steps in ACA analysis:
+
+1) Data set up -- for each rating area, have lowest-cost bronze, silver and gold premiums (3 records for each age, in each rating area. With 501 rating areas and 45 age groups, should work out to 67,635 records). The original data likely included platinum and catastrophic tiers and may have included the premiums for all insurance products available. Winnow down to the lowest-code for those three tiers. Assign a unique ID to each rating area (in 2014, we used statename plus the rating ID...i.e. "Minnesota8". I wasn't consistent in naming for the states with multiples words. For example, "NewMexico1" has no spaces, but "New York1" has a space.)
+
+2) Benchmark -- pull the second-lowest cost silver for each age in each rating area. (should end up with 22,545 records). Create this as it's own table, and also update the main data table so that this is a field (match using age and rating area)
+
+
+3) Apply income groups - tax credits and "oop" costs (final consumer cost after tax credits are applied). People who are at or below 400% of poverty are eligible for tax credits. This dollar amount is different for Hawaii and Alaska. See income lookup table for specific amounts. You can use that table as a lookup to do the calculations. (there is an "ID" in the income lookup -- US-48, Alaska, Hawaii -- that you could put into the main data table so that you can easily match the main data table to the income lookup table for calculations)
+--I exploded the data table, so that each income group was added as a row, not a column. You could do a union query....
+
+select *, "200% poverty" as incomelevel
+from mydatatable
+union
+select *, "250% poverty" as incomelevel
+from mydatatable
+union
+
+etc.
+
+Include all the income levels that are listed in the income lookup table. (we started at 200% in 2014, largely because people below that threshold in Minnesota -- and possibly other states -- weren't in the exchanges; they were on separate insurance. if we do this in future, might want to drop down to include 100% and 150%)
+
+
+4) Once you have a new table created with separate income level records for each of the original data records, then add fields for the calculations: taxcredit, oop, pctincome (in 2014, we did not put the affordability cap  number or the income dollar amount in the main table. but that might be worth adding for future, just to make it easier). Also add a field called "eligible" and flag it with "y" for the incomelevels that are eligible for the tax credit. Mark it "n" for the rest. Note: keep the pctincome field as a decimal; don't format to percentage
+
+Calculations: 
+Tax credit --- Benchmark number minus affordability cap where eligible="y" (the affordability cap is stored in the income lookup table; be sure to take into account the different cap numbers for AK and HI)
+If the answer to that is a negative number, set the tax credit to zero.
+
+OOP -- Premium (of the silver, bronze or gold plan being purchased) minus tax credit (do this for all the records)
+If the answer to that is a negative number, set the OOP to zero.
+
+PctIncome -- (OOP*12)/income  --- the first part of this multiplies that monthly OOP cost times 12 to get an annual cost and then divide by the annual income (which came from the income lookup table). Run this for all records in the table.
+
+
+5) Then we added a quartile (or bucket) for each age/metal tier/income level combination. I was doing this work on SQL Server and the 2005 and newer versions allowed you to use NTILE and "partition over" to assign quartiles to all of the records, within each group
+
+here's the query-- it makes a new table; the quartile is based on the "Pctincome" column:
+select rateareatxt, metal, ratingarea, age, premium, [state], exchange, detaillevel, statename, [type], benchmark, credit, incomelevel, oop, 
+pctincome,  ntile(4) over (partition by metal, age, incomelevel order by pctincome asc) as Bucket, creditYN into new_oop_q
+from new_oop
+
+
+6) After you get the new table, you need to check the break points on each of the quartiles to make sure the data is falling into the right bucket. To do that, I first made a lookup table of where the breaks were -- rounding the pctincome number to create distinct buckets. (Note: this rounds pctincome to 3 decimal points. This assumes the pctincome field is set as a decimal-- not a percentage)
+
+select metal, age, incomelevel, bucket, min(round(pctincome,3)) as MinPctIncome, max(round(pctincome,3)) as MaxPctIncome
+from new_oop_Q
+group by metal, age, incomelevel, bucket
+
+7) Then I used that new lookup table to join back to the data table (new_oop_q) to set the buckets (I did this in a new "bucket" column so I didn't overwrite the old bucket numbers)
+
+update new_oop_q set newbucket = lookuptable.bucket
+from new_oop_q, lookuptable
+where new_oop_q.metal=lookuptable.metal
+and new_oop_q.age=lookuptable.age
+and new_oop_q.incomelevel=lookuptable.incomelevel
+and round(new_oop_q.pctincome,3)>=minPctIncome and round(new_oop_q.pctincome,3)<=MaxPctIncome
+
+That did a good job of resolving problems where data points with the same ROUNDED pctincome ended up in different buckets. 
+

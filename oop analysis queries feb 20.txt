@@ -1,0 +1,79 @@
+update new_oop set eligible='y' where incomelevel='200% poverty'
+or incomelevel='250% poverty'
+or incomelevel='300% poverty'
+or incomelevel='350% poverty'
+or incomelevel='400% poverty'
+
+
+update new_oop
+set credit=benchmark-affordcap
+from new_oop, income_lkup
+where new_oop.incomelevel=povertylevel
+and new_oop.statecode=income_lkup.statecode
+and new_oop.eligible='y'
+
+update new_oop set credit=0 where credit<0
+
+update new_oop set credit=0 where eligible is null
+
+
+update new_oop set oop=0 where oop<0
+
+
+update new_oop set new_oop.pctincome=(oop*12)/income_lkup.incometop
+from new_oop, income_lkup
+where new_oop.incomelevel=income_lkup.povertylevel
+and new_oop.statecode=income_lkup.statecode
+
+
+
+
+update new_oop set type='Lowest'
+
+
+-------------------------
+DO NEXT QUERY ON SQL SERVER 2005
+
+
+select rateareatxt, metal, ratingarea, age, premium, [state], exchange, detaillevel, statename, [type], benchmark, credit, incomelevel, oop, 
+pctincome,  ntile(4) over (partition by metal, age, incomelevel order by pctincome asc) as Bucket, creditYN into new_oop_q
+from new_oop
+
+
+update new_oop_Q set eligible='y' where incomelevel='200% poverty'
+or incomelevel='250% poverty'
+or incomelevel='300% poverty'
+or incomelevel='350% poverty'
+or incomelevel='400% poverty'
+
+
+
+update new_oop_q set online ='y'
+where metal='silver' and (incomelevel='450% poverty' or 
+incomelevel='500% poverty' 
+or incomelevel='600% poverty' 
+or incomelevel='700% poverty' 
+or incomelevel='800% poverty' or incomelevel='200% poverty' or incomelevel='250% poverty'  
+or incomelevel='300% poverty' or incomelevel='350% poverty' or incomelevel='400% poverty'  )
+and (age='0-20' or age='25' or age='30' or age='40' or age='50' or age='60' or age='64+')
+
+
+
+
+
+GENERATE EXPORT FILES:
+
+
+SELECT rateareatxt,metal,ratingarea,age,premium,state,exchange,detaillevel,statename,type,benchmark,credit,incomelevel,oop,pctincome,bucket,creditYN
+into new_online
+FROM NEW_OOP_Q
+where online='y'
+
+
+SELECT rateareatxt,metal,ratingarea,age,premium,state,exchange,detaillevel,statename,type,benchmark,credit,incomelevel,oop,pctincome,bucket,creditYN
+into new_basic
+FROM NEW_OOP_Q
+WHERE metal='silver' and age='50' and incomelevel='350% poverty'
+
+
+
